@@ -12,15 +12,54 @@ using namespace std;
 
 const char* SOURCENAV_DBDUMPPATH = ".\\SourceNavigator\\dbdump.exe";
 const char* SOURCENAV_DBDUMPFILE = "D:\\NEH\\01 VS\\2005Panzer\\sn\\SNDB4\\panzer.fil";
-const char* TRACYREGISTRYFILE = "tracyRegistry.txt";
-const char* TRACY_INPUTFILE = ".\\SourceNavigator\\tracy_dbdump_fil.txt";
+const char* TRACYREGISTRYFILE = ".\\Output\\tracyRegistry.txt";
+const char* TRACYLOGFILE = ".\\Output\\tracyLog.txt";
+const char* TRACY_INPUTFILE = ".\\Output\\tracy_dbdump_fil.txt";
 
-int _tmain(int argc, _TCHAR* argv[])
+int main(int argc, char* argv[])
 {
+	string checker;
+	char* sourceNavDumpFile = const_cast<char*>(SOURCENAV_DBDUMPFILE);
+
+	if(argc != 2)
+	{
+		std::cout<<"Usage: "<<argv[0]<<" Path_to_SourceNav_ProjOutput_.fil"<<std::endl;
+		std::cout<<"-> using default path["<< SOURCENAV_DBDUMPFILE <<"] for current run"<<std::endl;
+	}
+	else
+	{
+		checker = argv[1];
+		if(checker.find(".fil") != std::string::npos)
+		{
+			std::fstream fs;
+			fs.open(checker.c_str());
+			if (fs.fail()) 
+			{
+				std::cout<<"Error: No such file found ["<< checker <<"]"<<std::endl;
+				return -1;
+			}
+			else
+			{
+				sourceNavDumpFile = const_cast<char*>(checker.c_str());
+			}
+		}
+		else
+		{
+			std::cout<<"Error: Wrong file type (.fil) ["<< checker <<"]"<<std::endl;
+			return -1;
+		}
+	}
+
+	//------------------------------------------------------
+	std::cout<<"****************************************************"<<std::endl;
+	std::cout<<"*                TRACY INSTRUMENTER                *"<<std::endl;
+	std::cout<<"****************************************************"<<std::endl;
+
 	//------------------------------------------------------
 	//Perform dbdump of the SourceNavigator db4
+	std::cout<<"-> 1. Performing dbdump of Source Navigator file["<<sourceNavDumpFile<<"]..."<<std::endl;
 	char command[250];  
-	sprintf (command, "%s -s # \"%s\" > \"%s\"", SOURCENAV_DBDUMPPATH, SOURCENAV_DBDUMPFILE, TRACY_INPUTFILE);   
+	sprintf_s(command, 250, "%s -s # \"%s\" > \"%s\"", SOURCENAV_DBDUMPPATH, sourceNavDumpFile, TRACY_INPUTFILE);   
 	system(command);
 
 	//------------------------------------------------------
@@ -38,12 +77,15 @@ int _tmain(int argc, _TCHAR* argv[])
 	unsigned int uniqueCounter_= 1;
 	std::ofstream ofs_registry;
 	ofs_registry.open(TRACYREGISTRYFILE, std::ofstream::out | std::ofstream::trunc);
+	std::ofstream ofs_log;
+	ofs_log.open(TRACYLOGFILE, std::ofstream::out | std::ofstream::trunc);
 
 	//Init
 	tracyRegistry.clear();
 	
 	//------------------------------------------------------
 	//Read in SourceNavi output
+	std::cout<<"-> 2. Accessing output of dbdump["<<TRACY_INPUTFILE<<"]..."<<std::endl;
 	std::ifstream ifs;
 	ifs.open(TRACY_INPUTFILE, std::ifstream::in);
 
@@ -59,7 +101,7 @@ int _tmain(int argc, _TCHAR* argv[])
 			if(stat != STAT_OK)
 			{
 				string stringPrint = (stat == STAT_SKIP)?"Skipped":"Error";
-				std::cout<<stringPrint<<": ["<<line<<"]"<<std::endl;
+				ofs_log<<" -> "<<stringPrint<<": ["<<line<<"]"<<std::endl;
 				delete tracyMethod;
 			}
 			else
@@ -68,6 +110,7 @@ int _tmain(int argc, _TCHAR* argv[])
 				it = tracyRegistry.find(fileName);
 				if (it == tracyRegistry.end())
 				{
+					std::cout<<" -> Creating new TracyFile["<<fileName<<"] for instrumenting recording..."<<std::endl;
 					tracyFile = new TracyFile(fileName);
 					tracyRegistry.insert(std::pair<string,TracyFile*>(fileName,tracyFile));
 				}
@@ -90,19 +133,21 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	//------------------------------------------------------
 	//Time to instrument the codes
+	std::cout<<"-> 3. Starting to instrument files..."<<std::endl;
 	if(totalParse > 0)
 	{
 		for (it=tracyRegistry.begin(); it!=tracyRegistry.end(); ++it)
 		{
 			tracyFile = it->second;
 
-			std::cout <<"Instrumenting ["<< it->first << "] Total= " <<tracyFile->getNumMethod() <<std::endl;
+			std::cout <<" -> Instrumenting ["<< it->first << "] Total= " <<tracyFile->getNumMethod() <<std::endl;
 			tracyFile->instrument(&ofs_registry, uniqueCounter_);
 		}
 	}
 
 	ofs_registry.close();
-
+	ofs_log.close();
+	std::cout<<"-> 4. Done..."<<std::endl;
 
 	return 0;
 }

@@ -312,14 +312,22 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 				*registry << uniqueCounter << " : File=" << pathFileName_ << " Function=" <<(*it).ptr_->getName() << " Line=" <<(*it).ptr_->getLine()<< " Added=" <<oss.str()<<std::endl;
 				uniqueCounter++;
 
-				//'{' is the last char
-				if((line.size()-1) == found)
+				//Already instrumented
+				if(line.find(oss.str()) != std::string::npos)
 				{
-					line.append(oss.str());
+					std::cout <<" -> Already instrumented Function["<< (*it).ptr_->getName() << "] Line["<<(*it).ptr_->getLine()<<"] with [" <<oss.str() <<"]"<<std::endl;
 				}
 				else
 				{
-					line.insert(found+1, oss.str());
+					//'{' is the last char
+					if((line.size()-1) == found)
+					{
+						line.append(oss.str());
+					}
+					else
+					{
+						line.insert(found+1, oss.str());
+					}
 				}
 
 				

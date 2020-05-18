@@ -337,9 +337,10 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 		{
 			ofs << line <<std::endl;
 		}
-
-		ifs.close();
-		ofs.close();
 	}
+
+	ifs.close();
+	ofs.close();
+
 	return status;
 }

@@ -10,11 +10,21 @@
 
 using namespace std;
 
+const char* SOURCENAV_DBDUMPPATH = ".\\SourceNavigator\\dbdump.exe";
+const char* SOURCENAV_DBDUMPFILE = "D:\\NEH\\01 VS\\2005Panzer\\sn\\SNDB4\\panzer.fil";
 const char* TRACYREGISTRYFILE = "tracyRegistry.txt";
-const char* sourceNavOutput = "tracyInstrument_fil.txt";
+const char* TRACY_INPUTFILE = ".\\SourceNavigator\\tracy_dbdump_fil.txt";
 
 int _tmain(int argc, _TCHAR* argv[])
 {
+	//------------------------------------------------------
+	//Perform dbdump of the SourceNavigator db4
+	char command[250];  
+	sprintf (command, "%s -s # \"%s\" > \"%s\"", SOURCENAV_DBDUMPPATH, SOURCENAV_DBDUMPFILE, TRACY_INPUTFILE);   
+	system(command);
+
+	//------------------------------------------------------
+	//Perform preprocessing of dbdump
 	STATUS stat;
 	std::string fileName;
 	TracyFile* tracyFile;
@@ -35,7 +45,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	//------------------------------------------------------
 	//Read in SourceNavi output
 	std::ifstream ifs;
-	ifs.open(sourceNavOutput, std::ifstream::in);
+	ifs.open(TRACY_INPUTFILE, std::ifstream::in);
 
 	if (ifs.is_open()) 
 	{
@@ -90,6 +100,8 @@ int _tmain(int argc, _TCHAR* argv[])
 			tracyFile->instrument(&ofs_registry, uniqueCounter_);
 		}
 	}
+
+	ofs_registry.close();
 
 
 	return 0;

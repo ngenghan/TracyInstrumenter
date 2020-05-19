@@ -254,6 +254,7 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 	std::size_t found,nextDat; 
 	unsigned int currLine = 1;
 	unsigned int lineToSkip;
+
 	std::ifstream ifs;
 	ifs.open(pathFileName_.c_str(), std::ifstream::in);
 	//-------------------------------
@@ -307,7 +308,8 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 			if(isFound)
 			{
 				std::ostringstream oss;
-				oss << "TRACY_PRINT(" << uniqueCounter << ");";
+				//oss << "TRACY_PRINT(" << uniqueCounter << ");";
+				oss << "printf(\"[" << uniqueCounter << "]\");";
 
 				*registry << uniqueCounter << " : File=" << pathFileName_ << " Function=" <<(*it).ptr_->getName() << " Line=" <<(*it).ptr_->getLine()<< " Added=" <<oss.str()<<std::endl;
 				uniqueCounter++;
@@ -349,6 +351,15 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 
 	ifs.close();
 	ofs.close();
+
+	//-------------------------------
+	//Perform the renaming
+	string oriFile = pathFileName_;
+	oriFile.insert(oriFile.find_last_of("."),"_ORI");
+	if(rename(pathFileName_.c_str(), oriFile.c_str()) == 0)
+	{
+		rename(newFile.c_str(), pathFileName_.c_str());
+	}
 
 	return status;
 }

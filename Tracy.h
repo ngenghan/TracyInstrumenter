@@ -1,11 +1,12 @@
 #ifndef __TRACY_H
 #define __TRACY_H
 
-#if defined(__cplusplus) && defined(TRACY)
+#if defined(__cplusplus)
 
 #include <windows.h>
 #include <fstream>
-#include "ifosLock.h"
+#include <mutex>  
+#include "Log.h"
 
 struct TRACY_VOID	{bool val;};
 enum TRACY_LEVEL	{L0=0,L1,L2,L3,L4,L5};
@@ -14,13 +15,15 @@ enum TRACY_INDENT_BRANCHTYPE	{INDENT_NA=32, INDENT_STARTBRANCH='{', INDENT_MIDBR
 const unsigned int BUFSIZE = 1024;
 const unsigned int TRACY_FUNCLEVEL_DEF = L5;
 const unsigned int TRACY_PARAMLEVEL_DEF = L5;
-const unsigned int BUFNUM = 1024 * BUFSIZE;
+const unsigned int BUFSET = 10 * 1024 * BUFSIZE;
 const unsigned int MAXFILENAME = 250;
-const unsigned int SIZEHEADER = 3 + sizeof(unsigned long) + (2 * sizeof(unsigned short)) + sizeof(char);
-const unsigned int FILER_BUFCOUNT = 2;
+//const unsigned int SIZEHEADER = 3 + sizeof(unsigned long) + (2 * sizeof(unsigned short)) + sizeof(char);
+const unsigned int SIZEHEADER = 1 + sizeof(unsigned long) + sizeof(byte) + sizeof(unsigned short);
+const unsigned int FILER_BUFCOUNT = 100;
+const unsigned int WRITETIMEOUT = 5000;
 
 #define TRACY_PROLOG ::GetTickCount()
-#define TRACY_GETTHREAD Tracy::TrachThread* = infra::app::getCurrentThread()->getTracyThread();
+//#define TRACY_GETTHREAD Tracy::TrachThread* = Tracy::TracyRegistry::instance()->getTracyThread();
 
 #define TRACY_SET_INSTRUMENT_LEVEL(F,P) \
 	TRACY_GETTHREAD \
@@ -28,26 +31,26 @@ const unsigned int FILER_BUFCOUNT = 2;
 	tracyThread->setParamLevel(P);
 
 #define TRACY_VFUNC(level, uId) \
-	TRACY_GETTHREAD \
-	TRACY_VFUNC_(tracyThread, level, uId, TRACY_VOID)
+	TRACY::TracyTracer __fnTraceObj(tracyThread, level, uId);
 
 namespace TRACY
 {
 class Filer
 {
 private:
-	ifDECLARE_LOCK(CriticalSection)
+	std::mutex mtx;
 	unsigned int randomTimeOut_;
-	unsigned int bufSwapCount_;
+	//unsigned int bufSwapCount_;
 	unsigned int currBuf_;
+	unsigned int currBufFlush_;
 	unsigned int currBufIndex_[FILER_BUFCOUNT];
-	std::ofstream stream;
+	std::ofstream stream_;
 	char buf_[FILER_BUFCOUNT][BUFSET];
 	unsigned long lastWrote_;
 
 public:
 	Filer()
-	:currBuf_(0),lastWrote_(0),bufSwapCount_(0)
+	:currBuf_(0),lastWrote_(0),currBufFlush_(FILER_BUFCOUNT-1)//,bufSwapCount_(0)
 	{
 		randomTimeOut_ = rand()%1000;
 		
@@ -69,8 +72,128 @@ public:
 
 		stream_.open(fileName, std::ios::out|std::ios::trunc|std::ios::binary);
 	}
-	void print(TRACY_INDENT_BRANCHTYPE type, unsigned short indentLevel, unsigned int uId, char* dat, int datLen);
-	voiod flush(unsigned long timeNow, bool isForced, bool flushOtherBuf);
+
+	inline void flush(unsigned long timeNow, bool isForced, bool flushOtherBuf)
+	{
+		static bool isStop = false;
+		std::unique_lock<std::mutex> lck(mtx, std::defer_lock);
+		lck.lock();
+		unsigned int LOCAL_currBuf_ = currBuf_;
+		unsigned int LOCAL_currBufFlush = currBufFlush_;
+		lck.unlock();
+
+		unsigned int totalToFlush = 0;
+		unsigned int bufToFlush = LOCAL_currBuf_;
+		if (flushOtherBuf)
+		{
+			if (((LOCAL_currBufFlush + 1) % FILER_BUFCOUNT) != LOCAL_currBuf_)//if (bufSwapCount_ > 0)
+			{
+				//bufToFlush = (bufToFlush == 0) ? 1 : 0;
+				bufToFlush = (LOCAL_currBufFlush + 1) % FILER_BUFCOUNT;
+
+				if (LOCAL_currBuf_ > bufToFlush)
+				{
+					totalToFlush = LOCAL_currBuf_ - bufToFlush;
+				}
+				else
+				{
+					totalToFlush = FILER_BUFCOUNT - bufToFlush + LOCAL_currBuf_;
+				}
+
+				// totalToFlush = (totalToFlush > 3) ? 3 : totalToFlush;
+				printf("### Flushing Start: BUF%d total%d [currBuf_=%d currBufFlush=%d]\n", bufToFlush, totalToFlush, LOCAL_currBuf_, LOCAL_currBufFlush);
+			}
+			else
+			{
+				return;
+			}
+		}
+
+		unsigned int lastWrite = 0;
+		for (unsigned int i = 0; i < totalToFlush; ++i)
+		{
+			lastWrite = (bufToFlush + i) % FILER_BUFCOUNT;
+
+			if ((currBufIndex_[lastWrite] > 0)// &&
+			   // (((lastWrote_ - timeNow) >= (WRITETIMEOUT + randomTimeOut_))
+			   //     || isForced))
+				)
+			{
+				//if (!isStop)
+				//{
+				printf("### Flushing BUF%d \n", lastWrite);
+				stream_.write(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
+				//stream_.flush();
+				currBufIndex_[lastWrite] = 0;
+				lastWrote_ = timeNow;
+				//bufSwapCount_--;
+
+				//isStop = true;
+			//}
+			}
+		}
+
+		lck.lock();
+		currBufFlush_ = lastWrite;
+		lck.unlock();
+	}
+
+	inline void print(TRACY_INDENT_BRANCHTYPE type, unsigned short indentLevel, unsigned short uId, char* dat, int datLen)
+	{
+		//static bool isStop = false;
+		std::unique_lock<std::mutex> lck(mtx, std::defer_lock);
+		//lck.lock();
+		unsigned int LOCAL_currBuf_ = currBuf_;
+		unsigned int LOCAL_currBufFlush = currBufFlush_;
+		//lck.unlock();
+		
+		unsigned long timeNow = TRACY_PROLOG;
+		if ((BUFSET - currBufIndex_[LOCAL_currBuf_]) < (datLen + SIZEHEADER))
+		{
+			//Next BUF to use
+			unsigned int prevbuf = LOCAL_currBuf_;
+			LOCAL_currBuf_ = (LOCAL_currBuf_ + 1) % FILER_BUFCOUNT;//currBuf_ = (currBuf_ == 0) ? 1 : 0;
+
+			lck.lock();
+			currBuf_ = LOCAL_currBuf_;
+			lck.unlock();
+
+			printf("### BUF%d full, using next BUF%d\n", prevbuf, LOCAL_currBuf_);
+
+			if (LOCAL_currBuf_ == LOCAL_currBufFlush)
+			{
+				printf("### All BUF full. Waiting for flushing [FlushBuf=%d]\n", LOCAL_currBufFlush);
+
+				while (LOCAL_currBuf_ == LOCAL_currBufFlush)
+				{
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
+				}
+				printf("### BUF cleared [FlushBuf=%d]\n", LOCAL_currBufFlush);
+			}
+
+			currBufIndex_[LOCAL_currBuf_] = 0;
+			//bufSwapCount_++;
+			// isStop = true;
+		}
+		
+		//if (!isStop)
+		{
+			//byte buId = (byte)uId;
+			byte bindentLevel = (byte)indentLevel;
+
+			buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]++] = '#';
+			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &uId, sizeof(unsigned short));	currBufIndex_[LOCAL_currBuf_] += sizeof(unsigned short);
+			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &timeNow, sizeof(unsigned long));  currBufIndex_[LOCAL_currBuf_] += sizeof(unsigned long);
+			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &bindentLevel, sizeof(byte));  currBufIndex_[LOCAL_currBuf_] += sizeof(byte);
+			//buf_[currBuf_][currBufIndex_[currBuf_]++] = (char)type;
+			//buf_[currBuf_][currBufIndex_[currBuf_]++] = '[';
+			//if (datLen > 0)
+			//{
+			//   memcpy(&(buf_[currBuf_][currBufIndex_[currBuf_]]), dat, datLen);	currBufIndex_[currBuf_] += datLen;
+			//}
+			//buf_[currBuf_][currBufIndex_[currBuf_]++] = ']';
+		}
+	}
 	
 };
 
@@ -86,7 +209,7 @@ public:
 	TracyThread(const char* qName)
 	:funcLevel_(TRACY_FUNCLEVEL_DEF),
 	paramLevel_(TRACY_PARAMLEVEL_DEF),
-	indentLevel_0)
+	indentLevel_(0)
 	{
 		filer_.init(qName);
 
@@ -105,41 +228,64 @@ public:
 		unsigned long timeNow = TRACY_PROLOG;
 		filer_.flush(timeNow, isForced, flushOtherBuf);
 	}
-	void printX(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr, ...);
-	void print(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr);
+
+	inline void printX(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr, ...)
+	{
+		memset(&(workingBuf_[0]), 0, BUFSIZE);
+		va_list argList;
+		va_start(argList, ctlStr);
+		int increment = vsprintf_s(workingBuf_, BUFSIZE, ctlStr, argList);
+		va_end(argList);
+
+		if (increment < 0)
+		{
+			memset(&(workingBuf_[0]), 0, BUFSIZE);
+			sprintf_s(&(workingBuf_[0]), BUFSIZE, "TracError: Err in arg(A)");
+		}
+		else if ((increment + SIZEHEADER) >= BUFSIZE)
+		{
+			workingBuf_[BUFSIZE - 1] = '\0';
+		}
+		filer_.print(type, indentLevel_, uId, workingBuf_, increment);
+	}
+	inline void print(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr)
+	{
+		filer_.print(type, indentLevel_, uId, const_cast<char*>(ctlStr), (int)::strlen(ctlStr));
+	}
+
 };
 
-template <typename T>
+//template <typename T>
 class TracyTracer
 {
 private:
-	char workingBuf_[BUFSIZE];
+	//char workingBuf_[BUFSIZE];
 	unsigned short uId_;
 	unsigned short m_level;
-	T* m_pRetVal;
-	Tracy::TracyThread* tracyThread_;
+	//T* m_pRetVal;
+	TracyThread* tracyThread_;
 public:
-	TracyTracer(Tracy::TracyThread* tracyThread, unsigned short level, unsigned short uId):
-	m_pRetVal(NULL),
+	TracyTracer(TracyThread* tracyThread, unsigned short level, unsigned short uId):
+	//m_pRetVal(NULL),
 	m_level(level),
 	uId_(uId),
 	tracyThread_(tracyThread)
 	{
-		if(tracyThread_->getFuncLevel() >= m_level)
+		//if(tracyThread_->getFuncLevel() >= m_level)
 		{
 			tracyThread_->print(INDENT_STARTBRANCH, uId_, "");
 			tracyThread_->incrIndent();
 		}
 	}
-	TracyTracer(Tracy::TracyThread* tracyThread, unsigned short level, unsigned short uId, const char* ctlStr, ...):
-	m_pRetVal(NULL),
+	TracyTracer(TracyThread* tracyThread, unsigned short level, unsigned short uId, const char* ctlStr, ...):
+	//m_pRetVal(NULL),
 	m_level(level),
 	uId_(uId),
 	tracyThread_(tracyThread)
 	{
-		if(tracyThread_->getFuncLevel() >= m_level)
+		//if(tracyThread_->getFuncLevel() >= m_level)
 		{
-			memset(&(workingBuf_[0]),0,BUFSIZE);
+			/*memset(&(workingBuf_[0]),0,BUFSIZE);
 			va_list argList;
 			va_start(argList, ctlStr);
 			int increment = vsprintf_s(workingBuf_, BUFSIZE, ctlStr, argList);
@@ -156,32 +302,32 @@ public:
 			}
 		
 			tracyThread_->print(INDENT_STARTBRANCH, uId_, workingBuf_);
-			tracyThread_->incrIndent();
+			tracyThread_->incrIndent();*/
 		}
 	}	
-	~TracyTracer(0
+	~TracyTracer()
 	{
-		if(tracyThread_->getParamLevel() >= m_level || tracyThread_->getFuncLevel() >= m_level)
+		//if(tracyThread_->getParamLevel() >= m_level || tracyThread_->getFuncLevel() >= m_level)
 		{ 	
 			tracyThread_->decrIndent();
 
-			if(tracyThread-->getParamLevel() >= m_level)
+			//if(tracyThread->getParamLevel() >= m_level)
 			{
-				if(m_pRetVal)
+				/*if(m_pRetVal)
 				{
 					tracyThread_->printX(INDENT_ENDBRANCH, uId_, "[0x%x]", Return());
-				}
+				}*/
 			}
 		}
 	}
-	void SetRetVal(T *retVal)
-	{
-		if(retVal)
-		{
-			m_pRetVal = retVal;
-		}
-	}
-	T Return()
+	//void SetRetVal(T *retVal)
+	//{
+	//	if(retVal)
+	//	{
+	//		//m_pRetVal = retVal;
+	//	}
+	//}
+	/*T Return()
 	{
 		if(m_pRetVal)
 		{
@@ -191,7 +337,7 @@ public:
 		{
 			return T();
 		}
-	}
+	}*/
 };
 }
 #else

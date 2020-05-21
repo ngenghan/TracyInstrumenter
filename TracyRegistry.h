@@ -4,6 +4,9 @@
 #include <iostream>
 #include <fstream>
 #include <map>
+#include <list>
+#include <thread>
+#include "Tracy.h"
 
 using namespace std;
 namespace TRACY
@@ -11,26 +14,89 @@ namespace TRACY
 	typedef list<TracyThread*> TracyThreadCtr;
 	typedef TracyThreadCtr::iterator TracyThreadCtrIt;
 
-	const unsigned int BUFSIZE = 1000;
+	//const unsigned int BUFSIZE = 1000;
 
 	class TracyRegistry
 	{
 	public:
-		static TracyRegistry* instance();
+        static TracyRegistry* instance()
+        {
+            if (instance_ == NULL)
+            {
+                std::unique_lock<std::mutex> lck(mtx, std::defer_lock);
+                lck.lock();
+
+                if (instance_ == NULL)
+                    instance_ = new TracyRegistry();
+                lck.unlock();
+            }
+            return instance_;
+        }
 	private:
 		static TracyRegistry* instance_;
-		mutable infra::os::Mutex mutex_;
+		static std::mutex mtx;
 		std::ofstream stream_;
 		static TracyThreadCtr* pThreadCtr_;
-		Thread theThread_;
+		thread* theThread_;
 
-		TracyRegistry();
-		~TracyRegistry();
+        TracyRegistry()
+        {
+            char fileName[BUFSIZE];
+
+            sprintf_s(fileName, BUFSIZE, "tracy_registry");
+            stream_.open(fileName, std::ios::out | std::ios::trunc);
+
+            pThreadCtr_ = new TracyThreadCtr();
+            pThreadCtr_->clear();
+
+            //std::thread t1(doCycle);
+            theThread_ = new std::thread(doCycle);
+            //theThread_.resume();
+        }
+        ~TracyRegistry()
+        {
+            if (stream_.is_open())
+            {
+                stream_.close();
+            }
+        }
 	public:
-		static void flush();
-		void add(TracyThread* thread);
-		void remove(TracyThread* thread);
-		static DWORD doCycle(LPVOID idPtr);
+		       
+        void add(TracyThread* thread)
+        {
+            pThreadCtr_->push_back(thread);
+        }
+        void remove(TracyThread* thread)
+        {
+            TracyThreadCtrIt i, end = pThreadCtr_->end();
+            for (i = pThreadCtr_->begin(); i != end; ++i)
+            {
+                if ((*i) == thread)
+                {
+                    pThreadCtr_->erase(i);
+                }
+            }
+        }
+        inline static void flush()
+        {
+            TracyThreadCtrIt i, end = pThreadCtr_->end();
+            for (i = pThreadCtr_->begin(); i != end; ++i)
+            {
+                (*i)->flush(false, true);
+            }
+        }
+       inline static void TracyRegistry::doCycle()
+        {
+            printf("### STARTING doCycle() \n");
+            unsigned int timeout = 100 + (rand() % 1000);
+
+            while (true)
+            {
+                flush();
+                std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+            }
+        }
+       
 	};
 }
 #endif

@@ -7,6 +7,13 @@
 #include <fstream>
 #include <mutex>  
 #include "Log.h"
+#include <vector>
+#include <stdio.h>
+
+using namespace std;
+
+typedef std::vector<string> FileCtr;
+
 
 struct TRACY_VOID	{bool val;};
 enum TRACY_LEVEL	{L0=0,L1,L2,L3,L4,L5};
@@ -19,8 +26,10 @@ const unsigned int BUFSET = 10 * 1024 * BUFSIZE;
 const unsigned int MAXFILENAME = 250;
 //const unsigned int SIZEHEADER = 3 + sizeof(unsigned long) + (2 * sizeof(unsigned short)) + sizeof(char);
 const unsigned int SIZEHEADER = 1 + sizeof(unsigned long) + sizeof(byte) + sizeof(unsigned short);
-const unsigned int FILER_BUFCOUNT = 100;
+const unsigned int FilerMgr_BUFCOUNT = 100;
 const unsigned int WRITETIMEOUT = 5000;
+const unsigned int FILER_MAXFILENUM = 5;
+const unsigned int FILER_MAXFILESIZ = 512 * 1024 * 1024;
 
 #define TRACY_PROLOG ::GetTickCount()
 //#define TRACY_GETTHREAD Tracy::TrachThread* = Tracy::TracyRegistry::instance()->getTracyThread();
@@ -33,44 +42,140 @@ const unsigned int WRITETIMEOUT = 5000;
 #define TRACY_VFUNC(level, uId) \
 	TRACY::TracyTracer __fnTraceObj(tracyThread, level, uId);
 
+
 namespace TRACY
 {
-class Filer
+	class Filer
+	{
+	private:
+		unsigned int numFile_, sizeFile_;
+		unsigned int currFileIndex_, currFileSize_;
+		FileCtr fileCtr_;
+		char fileName_[BUFSIZE];
+		char fileNameWorking_[BUFSIZE];
+
+		std::ofstream stream_;
+
+	public:
+		Filer(const char* name)
+		{
+			//Set the init values
+			numFile_ = FILER_MAXFILENUM;
+			sizeFile_ = FILER_MAXFILESIZ;
+			currFileIndex_ = numFile_ - 1;
+			currFileSize_ = 0;
+
+			//Set up the fileName to be used
+			sprintf_s(fileName_, BUFSIZE, "tracy_%s", name);
+			fileName_[MAXFILENAME - 1] = '\0';
+
+			//Init all the fileNum in ctr
+			for (unsigned int i = 0; i < numFile_; ++i)
+			{
+				fileCtr_.push_back("");
+			}
+
+			//Setup a new file for recording
+			setupNewFile();
+		};
+		~Filer()
+		{
+			fileCtr_.clear();
+			if (stream_.is_open())
+			{
+				stream_.close();
+			}
+		};
+		void flush(char* dat, unsigned int count)
+		{
+			//Writing this data will overflow the file limit
+			if ((currFileSize_ + count) > sizeFile_)
+			{
+				closeCurrFile();
+				if (setupNewFile())
+				{
+					return;
+				}
+			}
+			
+			stream_.write(dat, count);
+			currFileSize_ += count;
+		}
+	private:
+		void closeCurrFile()
+		{
+			if (stream_.is_open())
+			{
+				stream_.close();
+			}
+		}
+		bool setupNewFile()
+		{
+			bool status = false;
+			unsigned int newFileIndex = (currFileIndex_ + 1) % numFile_;
+
+			//Delete the oldFile if to be overriden
+			string oldFileName = fileCtr_[newFileIndex];
+			//If theres a valid filename 
+			if (oldFileName.compare("") != 0)
+			{
+				//delete the oldFile
+				if (remove(oldFileName.c_str()) != 0)
+				{
+					printf("Error in deleting file");
+					return status;
+				}
+			}
+
+			//generate the newFileName and save it
+			sprintf_s(fileNameWorking_, BUFSIZE, "%s_%lu.bin\0", fileName_, TRACY_PROLOG);
+			fileCtr_[newFileIndex] = string(fileNameWorking_);
+
+			//update the curr Tracking
+			currFileSize_ = 0;
+			currFileIndex_ = newFileIndex;
+
+			stream_.open(fileNameWorking_, std::ios::out | std::ios::trunc | std::ios::binary);
+			if (!stream_.is_open())
+			{
+				printf("Error in opening file");
+				return status;
+			}
+
+			status = true;
+			return status;
+		}
+	};
+
+class FilerMgr
 {
 private:
 	std::mutex mtx;
 	unsigned int randomTimeOut_;
-	//unsigned int bufSwapCount_;
 	unsigned int currBuf_;
 	unsigned int currBufFlush_;
-	unsigned int currBufIndex_[FILER_BUFCOUNT];
-	std::ofstream stream_;
-	char buf_[FILER_BUFCOUNT][BUFSET];
+	unsigned int currBufIndex_[FilerMgr_BUFCOUNT];
+	Filer* filer_;
+	char buf_[FilerMgr_BUFCOUNT][BUFSET];
 	unsigned long lastWrote_;
 
 public:
-	Filer()
-	:currBuf_(0),lastWrote_(0),currBufFlush_(FILER_BUFCOUNT-1)//,bufSwapCount_(0)
+	FilerMgr()
+	:currBuf_(0),lastWrote_(0),currBufFlush_(FilerMgr_BUFCOUNT-1)//,bufSwapCount_(0)
 	{
 		randomTimeOut_ = rand()%1000;
 		
-		memset(&(currBufIndex_[0]),0,FILER_BUFCOUNT*sizeof(unsigned int));
-		memset(&(buf_[0][0]),0,BUFSET*FILER_BUFCOUNT);
+		memset(&(currBufIndex_[0]),0,FilerMgr_BUFCOUNT*sizeof(unsigned int));
+		memset(&(buf_[0][0]),0,BUFSET*FilerMgr_BUFCOUNT);
 	}
-	~Filer()
+	~FilerMgr()
 	{
-		if(stream_.is_open())
-		{
-			stream_.close();
-		}
+		if (filer_)
+			delete filer_;
 	}
 	void init(const char* qName)
 	{
-		char fileName[BUFSIZE];
-		sprintf_s(fileName, BUFSIZE, "tracy_%s",qName);
-		fileName[MAXFILENAME-1] = '\0';
-
-		stream_.open(fileName, std::ios::out|std::ios::trunc|std::ios::binary);
+		filer_ = new Filer(qName);
 	}
 
 	inline void flush(unsigned long timeNow, bool isForced, bool flushOtherBuf)
@@ -86,10 +191,10 @@ public:
 		unsigned int bufToFlush = LOCAL_currBuf_;
 		if (flushOtherBuf)
 		{
-			if (((LOCAL_currBufFlush + 1) % FILER_BUFCOUNT) != LOCAL_currBuf_)//if (bufSwapCount_ > 0)
+			if (((LOCAL_currBufFlush + 1) % FilerMgr_BUFCOUNT) != LOCAL_currBuf_)//if (bufSwapCount_ > 0)
 			{
 				//bufToFlush = (bufToFlush == 0) ? 1 : 0;
-				bufToFlush = (LOCAL_currBufFlush + 1) % FILER_BUFCOUNT;
+				bufToFlush = (LOCAL_currBufFlush + 1) % FilerMgr_BUFCOUNT;
 
 				if (LOCAL_currBuf_ > bufToFlush)
 				{
@@ -97,7 +202,7 @@ public:
 				}
 				else
 				{
-					totalToFlush = FILER_BUFCOUNT - bufToFlush + LOCAL_currBuf_;
+					totalToFlush = FilerMgr_BUFCOUNT - bufToFlush + LOCAL_currBuf_;
 				}
 
 				// totalToFlush = (totalToFlush > 3) ? 3 : totalToFlush;
@@ -112,7 +217,7 @@ public:
 		unsigned int lastWrite = 0;
 		for (unsigned int i = 0; i < totalToFlush; ++i)
 		{
-			lastWrite = (bufToFlush + i) % FILER_BUFCOUNT;
+			lastWrite = (bufToFlush + i) % FilerMgr_BUFCOUNT;
 
 			if ((currBufIndex_[lastWrite] > 0)// &&
 			   // (((lastWrote_ - timeNow) >= (WRITETIMEOUT + randomTimeOut_))
@@ -122,7 +227,8 @@ public:
 				//if (!isStop)
 				//{
 				printf("### Flushing BUF%d \n", lastWrite);
-				stream_.write(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
+				filer_->flush(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
+				//stream_.write(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
 				//stream_.flush();
 				currBufIndex_[lastWrite] = 0;
 				lastWrote_ = timeNow;
@@ -152,7 +258,7 @@ public:
 		{
 			//Next BUF to use
 			unsigned int prevbuf = LOCAL_currBuf_;
-			LOCAL_currBuf_ = (LOCAL_currBuf_ + 1) % FILER_BUFCOUNT;//currBuf_ = (currBuf_ == 0) ? 1 : 0;
+			LOCAL_currBuf_ = (LOCAL_currBuf_ + 1) % FilerMgr_BUFCOUNT;//currBuf_ = (currBuf_ == 0) ? 1 : 0;
 
 			lck.lock();
 			currBuf_ = LOCAL_currBuf_;
@@ -200,7 +306,7 @@ public:
 class TracyThread
 {
 private:
-	Filer filer_;
+	FilerMgr FilerMgr_;
 	char workingBuf_[BUFSIZE];
 	unsigned short funcLevel_;
 	unsigned short paramLevel_;
@@ -211,7 +317,7 @@ public:
 	paramLevel_(TRACY_PARAMLEVEL_DEF),
 	indentLevel_(0)
 	{
-		filer_.init(qName);
+		FilerMgr_.init(qName);
 
 	}
 	~TracyThread()
@@ -226,7 +332,7 @@ public:
 	void flush(bool isForced, bool flushOtherBuf)
 	{
 		unsigned long timeNow = TRACY_PROLOG;
-		filer_.flush(timeNow, isForced, flushOtherBuf);
+		FilerMgr_.flush(timeNow, isForced, flushOtherBuf);
 	}
 
 	inline void printX(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr, ...)
@@ -246,11 +352,11 @@ public:
 		{
 			workingBuf_[BUFSIZE - 1] = '\0';
 		}
-		filer_.print(type, indentLevel_, uId, workingBuf_, increment);
+		FilerMgr_.print(type, indentLevel_, uId, workingBuf_, increment);
 	}
 	inline void print(TRACY_INDENT_BRANCHTYPE type, unsigned short uId, const char* ctlStr)
 	{
-		filer_.print(type, indentLevel_, uId, const_cast<char*>(ctlStr), (int)::strlen(ctlStr));
+		FilerMgr_.print(type, indentLevel_, uId, const_cast<char*>(ctlStr), (int)::strlen(ctlStr));
 	}
 
 };

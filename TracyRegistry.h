@@ -66,17 +66,7 @@ namespace TRACY
         {
             pThreadCtr_->push_back(thread);
         }
-        void remove(TracyThread* thread)
-        {
-            TracyThreadCtrIt i, end = pThreadCtr_->end();
-            for (i = pThreadCtr_->begin(); i != end; ++i)
-            {
-                if ((*i) == thread)
-                {
-                    pThreadCtr_->erase(i);
-                }
-            }
-        }
+
         inline static void flush()
         {
             TracyThreadCtrIt i, end = pThreadCtr_->end();
@@ -85,7 +75,7 @@ namespace TRACY
                 (*i)->flush(false, true);
             }
         }
-       inline static void TracyRegistry::doCycle()
+       inline static void doCycle()
         {
             printf("### STARTING doCycle() \n");
             unsigned int timeout = 100 + (rand() % 1000);

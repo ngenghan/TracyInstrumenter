@@ -28,7 +28,7 @@ const unsigned int MAXFILENAME = 250;
 const unsigned int SIZEHEADER = 1 + sizeof(unsigned long) + sizeof(byte) + sizeof(unsigned short);
 const unsigned int FilerMgr_BUFCOUNT = 100;
 const unsigned int WRITETIMEOUT = 5000;
-const unsigned int FILER_MAXFILENUM = 5;
+const unsigned int FILER_MAXFILENUM = 10;
 const unsigned int FILER_MAXFILESIZ = 512 * 1024 * 1024;
 
 #define TRACY_PROLOG ::GetTickCount()
@@ -151,6 +151,7 @@ class FilerMgr
 {
 private:
 	std::mutex mtx;
+	unsigned long uniqueTimer_;
 	unsigned int randomTimeOut_;
 	unsigned int currBuf_;
 	unsigned int currBufFlush_;
@@ -161,7 +162,7 @@ private:
 
 public:
 	FilerMgr()
-	:currBuf_(0),lastWrote_(0),currBufFlush_(FilerMgr_BUFCOUNT-1)//,bufSwapCount_(0)
+	:currBuf_(0),lastWrote_(0),currBufFlush_(FilerMgr_BUFCOUNT-1), uniqueTimer_(0)
 	{
 		randomTimeOut_ = rand()%1000;
 		
@@ -219,23 +220,12 @@ public:
 		{
 			lastWrite = (bufToFlush + i) % FilerMgr_BUFCOUNT;
 
-			if ((currBufIndex_[lastWrite] > 0)// &&
-			   // (((lastWrote_ - timeNow) >= (WRITETIMEOUT + randomTimeOut_))
-			   //     || isForced))
-				)
+			if ((currBufIndex_[lastWrite] > 0))
 			{
-				//if (!isStop)
-				//{
 				printf("### Flushing BUF%d \n", lastWrite);
 				filer_->flush(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
-				//stream_.write(&(buf_[lastWrite][0]), currBufIndex_[lastWrite]);
-				//stream_.flush();
 				currBufIndex_[lastWrite] = 0;
 				lastWrote_ = timeNow;
-				//bufSwapCount_--;
-
-				//isStop = true;
-			//}
 			}
 		}
 
@@ -253,7 +243,7 @@ public:
 		unsigned int LOCAL_currBufFlush = currBufFlush_;
 		//lck.unlock();
 		
-		unsigned long timeNow = TRACY_PROLOG;
+		unsigned long timeNow = uniqueTimer_++;
 		if ((BUFSET - currBufIndex_[LOCAL_currBuf_]) < (datLen + SIZEHEADER))
 		{
 			//Next BUF to use
@@ -289,7 +279,7 @@ public:
 
 			buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]++] = '#';
 			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &uId, sizeof(unsigned short));	currBufIndex_[LOCAL_currBuf_] += sizeof(unsigned short);
-			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &timeNow, sizeof(unsigned long));  currBufIndex_[LOCAL_currBuf_] += sizeof(unsigned long);
+			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &uniqueTimer_, sizeof(unsigned long));  currBufIndex_[LOCAL_currBuf_] += sizeof(unsigned long);
 			memcpy(&(buf_[LOCAL_currBuf_][currBufIndex_[LOCAL_currBuf_]]), &bindentLevel, sizeof(byte));  currBufIndex_[LOCAL_currBuf_] += sizeof(byte);
 			//buf_[currBuf_][currBufIndex_[currBuf_]++] = (char)type;
 			//buf_[currBuf_][currBufIndex_[currBuf_]++] = '[';

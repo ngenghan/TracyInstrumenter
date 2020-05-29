@@ -14,14 +14,16 @@ const char* SOURCENAV_DBDUMPPATH = ".\\SourceNavigator\\dbdump.exe";
 const char* SOURCENAV_DBDUMPFILE = "D:\\NEH\\01 VS\\2005Panzer\\sn\\SNDB4\\panzer.fil";
 const char* TRACYREGISTRYFILE = ".\\Output\\tracyRegistry.txt";
 const char* TRACYLOGFILE = ".\\Output\\tracyLog.txt";
-const char* TRACY_INPUTFILE = ".\\Output\\tracy_dbdump_fil.txt";
+const char* TRACY_INPUTFILE_INSTRUMENT = ".\\Output\\tracy_dbdump_fil.txt";
+const char* TRACY_INPUTFILE_DECODE = ".\\Input\\";
+const char* TRACY_OUTPUTFILE_DECODE = ".\\Output\\";
 
 int main(int argc, char* argv[])
 {
 	string checker;
 	char* sourceNavDumpFile = const_cast<char*>(SOURCENAV_DBDUMPFILE);
 
-	if(argc != 2)
+	/*if(argc != 2)
 	{
 		std::cout<<"Usage: "<<argv[0]<<" Path_to_SourceNav_ProjOutput_.fil"<<std::endl;
 		std::cout<<"-> using default path["<< SOURCENAV_DBDUMPFILE <<"] for current run"<<std::endl;
@@ -48,18 +50,27 @@ int main(int argc, char* argv[])
 			std::cout<<"Error: Wrong file type (.fil) ["<< checker <<"]"<<std::endl;
 			return -1;
 		}
-	}
+	}*/
 
 	//------------------------------------------------------
 	std::cout<<"****************************************************"<<std::endl;
-	std::cout<<"*                TRACY INSTRUMENTER                *"<<std::endl;
+	std::cout<<"*                TRACY INSTRUMENTER/DECODER        *"<<std::endl;
 	std::cout<<"****************************************************"<<std::endl;
+
+	//------------------------------------------------------
+	//Perform decoding of file
+	sourceNavDumpFile = const_cast<char*>(TRACY_INPUTFILE_DECODE);
+	std::cout<<"-> 1. Performing decoding of all bin files in ["<<sourceNavDumpFile<<"]..."<<std::endl;
+	TracyDecoder tracyDecoder;
+	tracyDecoder.decodeAllBinFiles(string(sourceNavDumpFile), string(TRACY_OUTPUTFILE_DECODE));
+
+
 
 	//------------------------------------------------------
 	//Perform dbdump of the SourceNavigator db4
 	std::cout<<"-> 1. Performing dbdump of Source Navigator file["<<sourceNavDumpFile<<"]..."<<std::endl;
 	char command[250];  
-	sprintf_s(command, 250, "%s -s # \"%s\" > \"%s\"", SOURCENAV_DBDUMPPATH, sourceNavDumpFile, TRACY_INPUTFILE);   
+	sprintf_s(command, 250, "%s -s # \"%s\" > \"%s\"", SOURCENAV_DBDUMPPATH, sourceNavDumpFile, TRACY_INPUTFILE_INSTRUMENT);   
 	system(command);
 
 	//------------------------------------------------------
@@ -85,9 +96,9 @@ int main(int argc, char* argv[])
 	
 	//------------------------------------------------------
 	//Read in SourceNavi output
-	std::cout<<"-> 2. Accessing output of dbdump["<<TRACY_INPUTFILE<<"]..."<<std::endl;
+	std::cout<<"-> 2. Accessing output of dbdump["<<TRACY_INPUTFILE_INSTRUMENT<<"]..."<<std::endl;
 	std::ifstream ifs;
-	ifs.open(TRACY_INPUTFILE, std::ifstream::in);
+	ifs.open(TRACY_INPUTFILE_INSTRUMENT, std::ifstream::in);
 
 	if (ifs.is_open()) 
 	{

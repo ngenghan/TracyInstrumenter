@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
 
 	//------------------------------------------------------
 	std::cout<<"****************************************************"<<std::endl;
-	std::cout<<"*                TRACY INSTRUMENTER/DECODER        *"<<std::endl;
+	std::cout<<"*            TRACY INSTRUMENTER/DECODER            *"<<std::endl;
 	std::cout<<"****************************************************"<<std::endl;
 
 	//------------------------------------------------------
@@ -63,6 +63,7 @@ int main(int argc, char* argv[])
 	std::cout<<"-> 1. Performing decoding of all bin files in ["<<sourceNavDumpFile<<"]..."<<std::endl;
 	TracyDecoder tracyDecoder;
 	tracyDecoder.decodeAllBinFiles(string(sourceNavDumpFile), string(TRACY_OUTPUTFILE_DECODE));
+	return 0;
 
 
 

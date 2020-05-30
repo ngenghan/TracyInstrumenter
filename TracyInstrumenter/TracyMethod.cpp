@@ -17,12 +17,7 @@ void TracyDecoder::emptyOut()
 	TracyThreadCtrIt it = tracyThreadCtr_.begin();
 	for(it;it != tracyThreadCtr_.end();++it)
 	{
-		//TracyFuncCtr* funcPtr = it->second;
-		//TracyFuncCtrIt it2 = funcPtr->begin();
-		//for(it2;it2 != funcPtr->end();++it2)
-		//{
-			delete it->second;
-		//}
+		delete it->second;
 	}
 }
 //---------------------------------------------
@@ -70,22 +65,11 @@ void TracyDecoder::decodeAllBinFiles(string inPath, string outPath)
 				continue;
 			}
 
-			//Check if this thread is saved before
-			//TracyThreadCtrIt thrIt;
-			//TracyFuncStats* tracyFuncStats;
-			//thrIt = tracyThreadCtr_.find(threadName);
-			//if (thrIt == tracyThreadCtr_.end())
-			//{
-				//tracyFuncStats = new TracyFuncStats();
-				//tracyThreadCtr_.insert(std::pair<string,TracyFuncStats*>(threadName,tracyFuncStats));
-			//}
-			//else
-			//{
-			//	tracyFuncStats = thrIt->second;
-			//}
-
+			//Decode the file 
 			std::cout<<"--> Parsing #"<<++counter<<"/"<<files.size()<<" File=["<<outStr<<"]"<<std::endl;
             decode(outStr, tracyFuncStats, timerStart);
+
+			//Output the file to CSV
 			writeToFile(outPathUpd, tracyFuncStats, timerStart);
         }
 		delete tracyFuncStats;
@@ -151,25 +135,28 @@ void TracyDecoder::decode(string fileToDecode, TracyFuncStats* tracyFuncStats, u
 	unsigned int parseMsg = 0;
 	unsigned int bytesLeft = 0;
 	unsigned int totalMsg = 0;
+
+	//Open stream to read the bin file
 	std::ifstream ifs;
 	ifs.open(fileToDecode.c_str(), std::ifstream::in| std::ios::binary);
 
 	if(ifs.is_open())
 	{
+		//Get the file size
 		ifs.seekg (0, ifs.end);
 		bytesLeft = ifs.tellg();
 		ifs.seekg (0, ifs.beg);
 		totalMsg = bytesLeft/TRACYMSG_SIZE;
 
 		TracyMsg msg;
-		//TracyFuncStats* tracyFuncStat;
-
-		//TracyFuncStatsIt its;
-
+		
+		//Loop through sets of msg in file
 		while(bytesLeft >= TRACYMSG_SIZE)
 		{
 			memset(&msg,0,sizeof(TracyMsg));
 			memset(&dat,0,TRACYMSG_SIZE);
+
+			//Read the msg and populate to template
 			ifs.read(dat, TRACYMSG_SIZE);
 			
 			memcpy(&msg.header_,&dat[TRACYMSG_HEADER_OFFSET],TRACYMSG_HEADER_LEN);
@@ -182,6 +169,7 @@ void TracyDecoder::decode(string fileToDecode, TracyFuncStats* tracyFuncStats, u
 			//Validate the msg
 			if(checkMsg(msg))
 			{
+				//Track the 1st msg and used its time to validate all other msg should be incremental 
 				if(isFirst)
 				{
 					firstTime = msg.time_;
@@ -190,6 +178,7 @@ void TracyDecoder::decode(string fileToDecode, TracyFuncStats* tracyFuncStats, u
 				}
 				else
 				{
+					//Check that subsequent msg are incremental in time by 1
 					if(msg.time_ != (timerChk + 1))
 					{
 						std::cout<<"---> Error in timer sequence"<<std::endl;
@@ -197,36 +186,20 @@ void TracyDecoder::decode(string fileToDecode, TracyFuncStats* tracyFuncStats, u
 					timerChk = msg.time_;
 				}
 
+				//Print out to console for update each sec
 				if((::GetCurrentTime() - delayTimer) > 1000)
 				{
 					delayTimer = ::GetCurrentTime();
 					printf("\r---> Decoding msg#%lu/%lu (%3.5f%%)",parseMsg,totalMsg,(float)((float)parseMsg/(float)totalMsg*100.0f));
 				}
 
+				//Track the no. of msg that are parsed
 				parseMsg++;
 
-				//it = tracyFuncCtr->find(msg.uId_);
-				//if (it == tracyFuncCtr->end())
-				//{
-				//	tracyFuncStat = new TracyFuncStats();
-					tracyFuncStats->push_back(std::pair<unsigned short,unsigned short>(msg.uId_,msg.indent_));
-
-				//	(*tracyFuncCtr)[msg.uId_] = tracyFuncStat;
-				//}
-				//else
-				//{
-				//	it->second->push_back(msg.time_);
-					/*its = it->second->find(msg.time_);
-					if (its == it->second->end())
-					{
-						it->second->insert(std::pair<unsigned long,unsigned int>(msg.time_,1));
-					}
-					else
-					{
-						its->second = its->second + 1;
-					}*/
-				//}
+				//Save the msg into the container
+				tracyFuncStats->push_back(std::pair<unsigned short,unsigned short>(msg.uId_,msg.indent_));
 			}
+			//The msg does not have a valid header
 			else
 			{
 				std::cout<<"---> Error in finding header of msg"<<std::endl;
@@ -265,49 +238,35 @@ void TracyDecoder::writeToFile(string fileToWrite, TracyFuncStats* tracyFuncStat
 	//To output decoded to CSV for offline processing
 	unsigned long timeCounter = 0;
 	unsigned long delayTimer = ::GetCurrentTime();
-	//TracyThreadCtrIt start = tracyThreadCtr_.begin();
-	//for(start;start!= tracyThreadCtr_.end();++start)
-	//{
-		string threadCsvFile = fileToWrite + ".csv";
-		std::cout<<"---> Writing to CSV file["<<threadCsvFile<<"]..."<<std::endl;
 
-		std::ofstream ofs_csv;
-		ofs_csv.open(threadCsvFile.c_str(), std::ofstream::out | std::ofstream::trunc);
+	std::cout<<"---> Writing to CSV file["<<fileToWrite<<"]..."<<std::endl;
 
-		//TracyFuncStats* tracyFuncStats = start->second;
-		ofs_csv << "Time,Uid,Indent"<<std::endl;
+	//Open stream to write the output CSV
+	std::ofstream ofs_csv;
+	ofs_csv.open(fileToWrite.c_str(), std::ofstream::out | std::ofstream::trunc);
 
-		//Loop through all the UiD that are stored
-		//unsigned long uidCounter = 0;
-		//unsigned long timeCounter = 0;
-		TracyFuncStatsIt start2 = tracyFuncStats->begin();
-		for(start2;start2!= tracyFuncStats->end();++start2)
+	//Write the header
+	ofs_csv << "Time,Uid,Indent"<<std::endl;
+
+	//Loop through all the Functions saved
+	TracyFuncStatsIt start2 = tracyFuncStats->begin();
+	for(start2;start2!= tracyFuncStats->end();++start2)
+	{
+		timeCounter++;
+
+		//[Time][UiD][Indent]
+		ofs_csv << firstTime++ <<","<< start2->first <<"," << start2->second<<std::endl;
+
+		//Print out to console for update each sec
+		if((::GetCurrentTime() - delayTimer) > 1000)
 		{
-			//uidCounter++;
-
-			//timeCounter = 0;
-			//TracyFuncStats* tracyFuncStats = start2->second;
-			//TracyFuncStatsIt start3 = tracyFuncStats->begin();
-			//for(start3;start3!= tracyFuncStats->end();++start3)
-			//{
-				timeCounter++;
-
-				//[Time][UiD]
-				//ofs_csv << start2->first << "," << *start3 <<std::endl;
-				ofs_csv << firstTime++ <<","<< start2->first <<"," << start2->second<<std::endl;
-
-				if((::GetCurrentTime() - delayTimer) > 1000)
-				{
-					delayTimer = ::GetCurrentTime();
-					//printf("\r->   Writing uId#%lu/%lu (%3.5f%%) => Msg#%lu/%lu (%3.5f%%)",uidCounter,tracyFuncCtr->size(),(float)((float)uidCounter/(float)tracyFuncCtr->size()*100.0f),
-					//	timeCounter,tracyFuncStats->size(),(float)((float)timeCounter/(float)tracyFuncStats->size()*100.0f));
-					printf("\r---> Writing Time#%lu/%lu (%3.5f%%)",timeCounter,tracyFuncStats->size(),(float)((float)timeCounter/(float)tracyFuncStats->size()*100.0f));
-				
-				}
-			//}
+			delayTimer = ::GetCurrentTime();
+			printf("\r---> Writing Time#%lu/%lu (%3.5f%%)",timeCounter,tracyFuncStats->size(),(float)((float)timeCounter/(float)tracyFuncStats->size()*100.0f));
 		}
-		ofs_csv.close();
-	//}
+	}
+	printf("\r---> Writing Time#%lu/%lu (%3.5f%%)\n",timeCounter,tracyFuncStats->size(),(float)((float)timeCounter/(float)tracyFuncStats->size()*100.0f));
+	
+	ofs_csv.close();
 }
 //---------------------------------------------
 bool TracyDecoder::checkMsg(TracyMsg msg)

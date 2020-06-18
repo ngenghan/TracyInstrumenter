@@ -1,6 +1,9 @@
 #include "TracyMethod.h"
 
 //---------------------------------------------
+
+
+//---------------------------------------------
 TracyDecoder::TracyDecoder()
 {
 	tracyThreadCtr_.clear();
@@ -477,7 +480,6 @@ STATUS TracyMethod::populateData_FIL(string line, string &fileName)
 			status = STAT_SKIP;
 		}
 	}
-	
 	//-------------------------------
 	return status;
 }
@@ -491,6 +493,21 @@ TracyFile::TracyFile(string fileName)
 {
 	clear();
 	pathFileName_ = fileName;
+
+	mapParam_.insert( std::pair<string,int>("bool", 1));
+	mapParam_.insert( std::pair<string,int>("char", 1));
+	mapParam_.insert( std::pair<string,int>("unsigned char", 1));
+	mapParam_.insert( std::pair<string,int>("byte", 1));
+	mapParam_.insert( std::pair<string,int>("short", 2));
+	mapParam_.insert( std::pair<string,int>("unsigned short", 2));
+	mapParam_.insert( std::pair<string,int>("int", 4));
+	mapParam_.insert( std::pair<string,int>("unsigned int", 4));
+	mapParam_.insert( std::pair<string,int>("DWORD", 4));
+	mapParam_.insert( std::pair<string,int>("UDWORD", 4));
+	mapParam_.insert( std::pair<string,int>("float", 4));
+	mapParam_.insert( std::pair<string,int>("double", 8));
+	mapParam_.insert( std::pair<string,int>("long", 8));
+	mapParam_.insert( std::pair<string,int>("unsigned long", 8));
 }
 
 //---------------------------------------------
@@ -527,6 +544,8 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 	bool status = false;
 	string line;
 	std::set<TracyMethodWrapper>::iterator it;
+	std::vector<string> paramList;
+	paramList.clear();
 
 	//-------------------------------
 	std::size_t found,nextDat; 
@@ -564,32 +583,103 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 				return status;
 			}
 
-			//Search for next '{'
+			string param;
+			bool searchingStill = true;
+			std::size_t paramComma, paramClose;
+			std::size_t isFoundChar = std::string::npos;
+
+			//----------------------------------------------
+			//Search for next '('
+			paramList.clear();
 			nextDat = found + (*it).ptr_->getName().length();
-			
-			bool isFound = false;
-			do{
-				found = line.find_first_of("{", nextDat);
-				if(found != std::string::npos)
+			isFoundChar = browseToFind("(", &ifs, &ofs, line, currLine, nextDat);
+
+			while(searchingStill)
+			{
+				paramClose = line.find_first_of(")",isFoundChar);
+				paramComma = line.find_first_of(",",isFoundChar);
+				if((paramComma == std::string::npos) || (paramComma > paramClose))
 				{
-					isFound = true;
-					break;
+					//No "," found, check if no parameters
+					//paramClose = line.find_first_of(")",isFoundChar);
+
+					if(paramClose == std::string::npos)
+					{
+						//No "," or ")" found, check next line
+						isFoundChar = 0;
+						getline(ifs, line);
+					}
+					else
+					{
+						//Found ")" and no input param
+						if((paramClose - isFoundChar) == 1)
+						{
+							//There is no input parameter
+						}
+						//Exist last input params
+						else
+						{
+							param = line.substr(isFoundChar+1, (paramClose - isFoundChar - 1));
+							paramList.push_back(param);
+						}
+						nextDat = paramClose;
+						searchingStill = false;
+					}
 				}
+				//Found a ","
 				else
 				{
-					currLine++;
-					ofs << line <<std::endl;
-					nextDat = 0;
+					param = line.substr(isFoundChar+1, (paramComma - isFoundChar - 1));
+					
+					//Ensure that next char is valid
+					if((paramComma + 1) <= line.length())
+					{
+						isFoundChar = paramComma + 1;
+					}
+					else
+					{
+						isFoundChar = 0;
+						getline(ifs, line);
+					}
+					paramList.push_back(param);
 				}
-			}while(getline(ifs, line));
-			
-			if(isFound)
+			}
+					
+
+			//----------------------------------------------
+			//Search for next '{'
+			isFoundChar = browseToFind("{", &ifs, &ofs, line, currLine, nextDat);
+
+			if(isFoundChar != std::string::npos)
 			{
 				std::ostringstream oss;
-				//oss << "TRACY_PRINT(" << uniqueCounter << ");";
-				oss << "printf(\"[" << uniqueCounter << "]\");";
+				//oss << "TRACY_VFUNC(L5," << uniqueCounter << ");";
+				oss << "TRACY_VFUNC(L5," << uniqueCounter;
 
-				*registry << uniqueCounter << " : File=" << pathFileName_ << " Function=" <<(*it).ptr_->getName() << " Line=" <<(*it).ptr_->getLine()<< " Added=" <<oss.str()<<std::endl;
+				std::size_t spaceIdx;
+				string currParamType;
+				string currParamName;
+				string currParam;
+				std::map<string, int>::iterator mapIt;
+				for(unsigned int i=0;i<paramList.size();++i)
+				{
+					currParam = paramList[i];
+					spaceIdx = currParam.find_last_of(" ");
+					if(spaceIdx != std::string::npos)
+					{
+						currParamType = currParam.substr(0,spaceIdx);
+						currParamName = currParam.substr(spaceIdx+1,currParam.size() - spaceIdx - 1);
+
+						mapIt = mapParam_.find(currParamType);
+						if(mapIt != mapParam_.end())
+						{
+							oss << "," << currParamName;
+						}
+					}
+				}
+				oss << ");";
+
+				*registry << uniqueCounter << "," << pathFileName_ << "," <<(*it).ptr_->getName() << "," <<(*it).ptr_->getLine()<< "," <<oss.str()<<std::endl;
 				uniqueCounter++;
 
 				//Already instrumented
@@ -600,13 +690,13 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 				else
 				{
 					//'{' is the last char
-					if((line.size()-1) == found)
+					if((line.size()-1) == isFoundChar)
 					{
 						line.append(oss.str());
 					}
 					else
 					{
-						line.insert(found+1, oss.str());
+						line.insert(isFoundChar+1, oss.str());
 					}
 				}
 
@@ -640,4 +730,24 @@ bool TracyFile::instrument(std::ofstream* registry, unsigned int &uniqueCounter)
 	}
 
 	return status;
+}
+//---------------------------------------------
+std::size_t TracyFile::browseToFind(string toFind, std::ifstream* ifsP, std::ofstream* ofsP, string &line, unsigned int &currLine, std::size_t &nextDat)
+{
+	std::size_t found = std::string::npos; 
+	do{
+		found = line.find_first_of(toFind, nextDat);
+		if(found != std::string::npos)
+		{
+			break;
+		}
+		else
+		{
+			currLine++;
+			(*ofsP) << line <<std::endl;
+			nextDat = 0;
+		}
+	}while(getline(*ifsP, line));
+
+	return found;
 }

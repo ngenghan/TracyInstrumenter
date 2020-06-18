@@ -96,6 +96,7 @@ class TracyFile
 private:
 	string pathFileName_;
 	std::set<TracyMethodWrapper> tracyMethodCtr_;
+	std::map<string,int> mapParam_;
  
 public:
     TracyFile(string filename);
@@ -105,6 +106,7 @@ public:
 	void addMethod(TracyMethodWrapper);
 	bool instrument(std::ofstream*, unsigned int&);
 	unsigned int getNumMethod();
+	std::size_t browseToFind(string toFind, std::ifstream* ifsP, std::ofstream* ofsP, string &line, unsigned int &currLine, std::size_t &nextDat);
 };
  
 #endif

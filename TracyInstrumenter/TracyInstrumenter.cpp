@@ -10,8 +10,9 @@
 
 using namespace std;
 
+const char* SOURCENAV = ".\\SourceNavigator\\SN-NG4.5\\bin\\snavigator.exe \"D:\\NEH\\01 VS\\TracyInstrumenterGIT\\TracyInstrumenter\\SourceNavigator\\Tracy.proj\"";
 const char* SOURCENAV_DBDUMPPATH = ".\\SourceNavigator\\dbdump.exe";
-const char* SOURCENAV_DBDUMPFILE = "D:\\NEH\\01 VS\\2005Panzer\\sn\\SNDB4\\panzer.fil";
+const char* SOURCENAV_DBDUMPFILE = "D:\\NEH\\01 VS\\TracyInstrumenterGIT\\TracyInstrumenter\\SourceNavigator\\SNDB4\\Tracy.fil";
 const char* TRACYREGISTRYFILE = ".\\Output\\tracyRegistry.txt";
 const char* TRACYLOGFILE = ".\\Output\\tracyLog.txt";
 const char* TRACY_INPUTFILE_INSTRUMENT = ".\\Output\\tracy_dbdump_fil.txt";
@@ -23,7 +24,7 @@ int main(int argc, char* argv[])
 	string checker;
 	char* sourceNavDumpFile = const_cast<char*>(SOURCENAV_DBDUMPFILE);
 
-	/*if(argc != 2)
+	if(argc != 2)
 	{
 		std::cout<<"Usage: "<<argv[0]<<" Path_to_SourceNav_ProjOutput_.fil"<<std::endl;
 		std::cout<<"-> using default path["<< SOURCENAV_DBDUMPFILE <<"] for current run"<<std::endl;
@@ -50,7 +51,7 @@ int main(int argc, char* argv[])
 			std::cout<<"Error: Wrong file type (.fil) ["<< checker <<"]"<<std::endl;
 			return -1;
 		}
-	}*/
+	}
 
 	//------------------------------------------------------
 	std::cout<<"****************************************************"<<std::endl;
@@ -59,13 +60,19 @@ int main(int argc, char* argv[])
 
 	//------------------------------------------------------
 	//Perform decoding of file
-	sourceNavDumpFile = const_cast<char*>(TRACY_INPUTFILE_DECODE);
+	/*sourceNavDumpFile = const_cast<char*>(TRACY_INPUTFILE_DECODE);
 	std::cout<<"-> 1. Performing decoding of all bin files in ["<<sourceNavDumpFile<<"]..."<<std::endl;
 	TracyDecoder tracyDecoder;
 	tracyDecoder.decodeAllBinFiles(string(sourceNavDumpFile), string(TRACY_OUTPUTFILE_DECODE));
-	return 0;
+	return 0;*/
 
 
+	//------------------------------------------------------
+	//Perform SourceNavigator
+	std::cout<<"-> 0. Starting Source Navigator file["<<sourceNavDumpFile<<"]..."<<std::endl;
+	//char command[250];  
+	//sprintf_s(command, 250, "%s", SOURCENAV_DBDUMPPATH, sourceNavDumpFile, TRACY_INPUTFILE_INSTRUMENT);   
+	system(SOURCENAV);
 
 	//------------------------------------------------------
 	//Perform dbdump of the SourceNavigator db4
@@ -148,6 +155,9 @@ int main(int argc, char* argv[])
 	std::cout<<"-> 3. Starting to instrument files..."<<std::endl;
 	if(totalParse > 0)
 	{
+		//Print the header in the registry
+		ofs_registry << "UiD,FilePath,FuncName,FuncLine,Added"<<std::endl;
+				
 		for (it=tracyRegistry.begin(); it!=tracyRegistry.end(); ++it)
 		{
 			tracyFile = it->second;
